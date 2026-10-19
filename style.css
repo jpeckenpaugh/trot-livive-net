@@ -151,6 +151,16 @@ button.ghost {
   align-items: center;
 }
 
+select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 14px;
+}
+
 input[type="number"],
 input[type="text"] {
   background: var(--panel-2);
@@ -273,6 +283,87 @@ td.flash {
 
 .small-weights {
   margin-top: 12px;
+}
+
+.fields.corpus {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.fields.corpus input[type="number"] {
+  width: 92px;
+}
+
+label.check {
+  gap: 6px;
+  cursor: pointer;
+}
+
+.data-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 16px;
+}
+
+.scroll.tall {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+table.data-table {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+  width: 100%;
+}
+
+table.data-table th,
+table.data-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+table.data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+}
+
+table.data-table td.num,
+table.data-table th.num {
+  text-align: right;
+}
+
+tr.label-1 td.tag {
+  color: var(--pos);
+}
+
+tr.label-0 td.tag {
+  color: var(--neg);
+}
+
+td.split {
+  color: var(--muted);
+}
+
+#rt-status.pass {
+  color: var(--good);
+}
+
+#rt-status.fail {
+  color: var(--pos);
+}
+
+@media (max-width: 820px) {
+  .data-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .trace {

@@ -25,6 +25,8 @@ struct State {
     step: u64,
     last_loss: f32,
     history: Vec<f32>,
+    seed: u64,
+    noise: f32,
 }
 
 static mut STATE: *mut State = null_mut();
@@ -70,8 +72,9 @@ fn farr(v: &[f32]) -> String {
     s
 }
 
-fn init_state(seed: u32) {
-    let ds = Dataset::generated(seed as u64, 256);
+fn init_state(seed: u32, n: u32, noise: f32) {
+    let n = (n as usize).clamp(100, 5000);
+    let ds = Dataset::generated_with(seed as u64, n, noise);
     let mut rng = Rng::new(seed as u64);
     let model = Model::new(ds.vocab_len(), 8, &mut rng);
     let s = State {
@@ -81,6 +84,8 @@ fn init_state(seed: u32) {
         step: 0,
         last_loss: 0.0,
         history: Vec::new(),
+        seed: seed as u64,
+        noise,
     };
     unsafe {
         if STATE.is_null() {
@@ -117,7 +122,7 @@ fn state_json(s: &State) -> String {
          \"train_acc\":{},\"test_acc\":{},\"train_loss\":{},\"test_loss\":{},\
          \"w1\":{},\"b1\":{},\"w2\":{},\"b2\":{},\"params\":{},\
          \"n\":{},\"n_pos\":{},\"n_neg\":{},\"train_n\":{},\"test_n\":{},\
-         \"history\":{}}}",
+         \"seed\":{},\"noise\":{},\"history\":{}}}",
         s.model.hidden,
         s.model.vocab,
         vocab_tokens,
@@ -137,6 +142,8 @@ fn state_json(s: &State) -> String {
         s.ds.negatives(),
         s.ds.train_idx.len(),
         s.ds.test_idx.len(),
+        s.seed,
+        s.noise,
         farr(&s.history),
     )
 }
@@ -184,8 +191,8 @@ pub extern "C" fn trot_out_len() -> usize {
 }
 
 #[no_mangle]
-pub extern "C" fn trot_init(seed: u32) {
-    init_state(seed);
+pub extern "C" fn trot_init(seed: u32, n: u32, noise: f32) {
+    init_state(seed, n, noise);
     let json = state_json(st());
     set_out(json.into_bytes());
 }
@@ -199,22 +206,75 @@ pub extern "C" fn trot_state_json() {
 #[no_mangle]
 pub extern "C" fn trot_dataset_json() {
     let s = st();
-    let examples =
-        s.ds.snippets
-            .iter()
-            .take(12)
-            .map(|sn| format!("{{\"text\":\"{}\",\"label\":{}}}", esc(&sn.text), sn.label))
-            .collect::<Vec<_>>()
-            .join(",");
+    let mut token_stats = String::from("[");
+    for (i, (pos, neg)) in s.ds.token_stats().iter().enumerate() {
+        if i > 0 {
+            token_stats.push(',');
+        }
+        token_stats.push_str(&format!(
+            "{{\"token\":\"{}\",\"pos\":{},\"neg\":{}}}",
+            esc(&s.ds.vocab[i]),
+            pos,
+            neg
+        ));
+    }
+    token_stats.push(']');
+
+    let mut snippets = String::from("[");
+    for (i, sn) in s.ds.snippets.iter().enumerate() {
+        if i > 0 {
+            snippets.push(',');
+        }
+        snippets.push_str(&format!(
+            "{{\"text\":\"{}\",\"label\":{},\"split\":\"{}\"}}",
+            esc(&sn.text),
+            sn.label,
+            if s.ds.is_test(i) { "test" } else { "train" }
+        ));
+    }
+    snippets.push(']');
+
     let json = format!(
-        "{{\"n\":{},\"n_pos\":{},\"n_neg\":{},\"train_n\":{},\"test_n\":{},\"vocab\":{},\"examples\":[{}]}}",
+        "{{\"n\":{},\"n_pos\":{},\"n_neg\":{},\"train_n\":{},\"test_n\":{},\"vocab\":{},\
+         \"seed\":{},\"noise\":{},\"token_stats\":{},\"snippets\":{}}}",
         s.ds.snippets.len(),
         s.ds.positives(),
         s.ds.negatives(),
         s.ds.train_idx.len(),
         s.ds.test_idx.len(),
         s.ds.vocab_len(),
-        examples
+        s.seed,
+        s.noise,
+        token_stats,
+        snippets
+    );
+    set_out(json.into_bytes());
+}
+
+/// Input presence vectors and the core's probabilities for the test split.
+/// Used by the browser to verify the exported ONNX against a standard runtime.
+#[no_mangle]
+pub extern "C" fn trot_roundtrip_json() {
+    let s = st();
+    let mut inputs = String::from("[");
+    let mut probs = String::from("[");
+    for (k, &i) in s.ds.test_idx.iter().enumerate() {
+        if k > 0 {
+            inputs.push(',');
+            probs.push(',');
+        }
+        let x = s.ds.vectorize(&s.ds.snippets[i].text);
+        inputs.push_str(&farr(&x));
+        probs.push_str(&format!("{}", s.model.forward(&x).p));
+    }
+    inputs.push(']');
+    probs.push(']');
+    let json = format!(
+        "{{\"n\":{},\"vocab\":{},\"inputs\":{},\"probs\":{}}}",
+        s.ds.test_idx.len(),
+        s.model.vocab,
+        inputs,
+        probs
     );
     set_out(json.into_bytes());
 }
@@ -314,5 +374,5 @@ pub extern "C" fn trot_export_onnx() -> usize {
 /// Version string so the host can confirm it loaded the right build.
 #[no_mangle]
 pub extern "C" fn trot_version() -> u32 {
-    1
+    2
 }

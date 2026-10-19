@@ -102,6 +102,26 @@ fn generator_is_deterministic_balanced_and_bounded() {
 }
 
 #[test]
+fn corpus_controls_respected() {
+    let clean = generator::generate_with_noise(7, 256, 0.0);
+    assert_eq!(clean.iter().filter(|s| s.label == 1).count(), 128);
+    assert_eq!(clean.iter().filter(|s| s.label == 0).count(), 128);
+
+    // Vocabulary is bounded at every supported corpus size.
+    for n in [100usize, 256, 1000, 5000] {
+        let ds = Dataset::generated_with(11, n, 0.08);
+        assert!(ds.vocab_len() <= 50, "n={n} vocab={}", ds.vocab_len());
+        assert_eq!(ds.snippets.len(), n);
+        assert_eq!(ds.positives() + ds.negatives(), n);
+    }
+
+    // Noise is balanced: counts stay 50/50 at the default rate.
+    let noisy = Dataset::generated_with(7, 1000, 0.08);
+    assert_eq!(noisy.positives(), 500);
+    assert_eq!(noisy.negatives(), 500);
+}
+
+#[test]
 fn loss_decreases_and_learns() {
     let ds = Dataset::generated(42, 256);
     let mut rng = Rng::new(42);

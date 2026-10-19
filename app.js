@@ -7,9 +7,15 @@ const enc = new TextEncoder();
 
 let ex = null;
 let state = null;
-let prevW1 = null;
 let datasetInfo = null;
+let prevW1 = null;
 let maxAbs = 1;
+let filterClass = "all";
+let filterToken = "";
+let ortPromise = null;
+
+const ORT_VERSION = "1.19.2";
+const ORT_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
 
 async function boot() {
   const res = await fetch("trot.wasm");
@@ -18,20 +24,16 @@ async function boot() {
   ex = instance.exports;
   $("build").textContent = `· wasm build v${ex.trot_version()}`;
 
-  ex.trot_init(42);
-  datasetInfo = JSON.parse(readOut());
+  ex.trot_init(42, 256, 0.08);
   // Start from a trained model so the demo is immediately useful; Reset goes
   // back to random weights.
   ex.trot_train(300, 0.3, 16);
+  datasetInfo = readDataset();
   state = readState();
-  await refresh(true);
 
-  $("dataset-line").textContent =
-    `${datasetInfo.n} generated sentences · ${datasetInfo.n_pos} positive / ${datasetInfo.n_neg} negative` +
-    ` · |V| = ${datasetInfo.vocab} · ${datasetInfo.train_n} train / ${datasetInfo.test_n} test` +
-    ` · ~8% label noise (deliberate, so train and test can diverge)` +
-    ` · trained 300 steps on load · Reset starts from random weights`;
-
+  refresh(true);
+  updateDatasetLine();
+  renderDataset();
   bind();
 }
 
@@ -50,6 +52,11 @@ function readOutBytes() {
 
 function readState() {
   ex.trot_state_json();
+  return JSON.parse(readOut());
+}
+
+function readDataset() {
+  ex.trot_dataset_json();
   return JSON.parse(readOut());
 }
 
@@ -75,11 +82,20 @@ function cell(text, cls) {
   return td;
 }
 
+function th(text, cls) {
+  const el = document.createElement("th");
+  el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+
 function weightStyle(v) {
   const t = Math.min(1, Math.abs(v) / maxAbs);
   const color = v >= 0 ? "248,113,113" : "96,165,250";
   return `rgba(${color},${(0.08 + 0.5 * t).toFixed(3)})`;
 }
+
+// ---- train / weights -----------------------------------------------------
 
 function renderWeights(s) {
   maxAbs = Math.max(1e-6, ...s.w1.flat().map((v) => Math.abs(v)));
@@ -90,20 +106,14 @@ function renderWeights(s) {
   const head = document.createElement("tr");
   head.appendChild(document.createElement("th"));
   for (const tok of s.vocab_tokens) {
-    const th = document.createElement("th");
-    th.className = "token";
-    th.textContent = tok;
-    head.appendChild(th);
+    head.appendChild(th(tok, "token"));
   }
   table.appendChild(head);
 
   const flat = s.w1.flat();
   s.w1.forEach((row, j) => {
     const tr = document.createElement("tr");
-    const rh = document.createElement("th");
-    rh.className = "rowhead";
-    rh.textContent = `h${j}`;
-    tr.appendChild(rh);
+    tr.appendChild(th(`h${j}`, "rowhead"));
     row.forEach((v, i) => {
       const td = cell(f3(v));
       td.style.background = weightStyle(v);
@@ -122,18 +132,11 @@ function renderWeights(s) {
   small.textContent = "";
   const header = document.createElement("tr");
   header.appendChild(document.createElement("th"));
-  for (let j = 0; j < s.hidden; j++) {
-    const th = document.createElement("th");
-    th.textContent = `h${j}`;
-    header.appendChild(th);
-  }
+  for (let j = 0; j < s.hidden; j++) header.appendChild(th(`h${j}`));
   small.appendChild(header);
   for (const [label, row] of [["b1", s.b1], ["W2", s.w2]]) {
     const tr = document.createElement("tr");
-    const rh = document.createElement("th");
-    rh.className = "rowhead";
-    rh.textContent = label;
-    tr.appendChild(rh);
+    tr.appendChild(th(label, "rowhead"));
     for (const v of row) tr.appendChild(cell(f3(v)));
     small.appendChild(tr);
   }
@@ -179,10 +182,18 @@ function render(s) {
   renderWeights(s);
 }
 
-async function refresh(initial) {
+function refresh(initial) {
   state = readState();
   render(state);
   if (initial) trace();
+}
+
+function updateDatasetLine() {
+  const d = datasetInfo;
+  $("dataset-line").textContent =
+    `${d.n} generated sentences · ${d.n_pos} positive / ${d.n_neg} negative` +
+    ` · |V| = ${d.vocab} · ${d.train_n} train / ${d.test_n} test` +
+    ` · seed ${d.seed} · ${Math.round(d.noise * 100)}% label noise`;
 }
 
 function train(steps) {
@@ -191,6 +202,83 @@ function train(steps) {
   ex.trot_train(steps, lr, batch);
   refresh(false);
 }
+
+function regenerate() {
+  const seed = parseInt($("seed").value, 10) || 0;
+  const n = Math.min(5000, Math.max(100, parseInt($("corpus-n").value, 10) || 256));
+  const noise = $("noise").checked ? 0.08 : 0;
+  if (!window.confirm(`Regenerate ${n} sentences from seed ${seed} and reset the model?`)) return;
+  $("corpus-n").value = n;
+  ex.trot_init(seed, n, noise);
+  prevW1 = null;
+  datasetInfo = readDataset();
+  state = readState();
+  render(state);
+  updateDatasetLine();
+  renderDataset();
+  trace();
+}
+
+// ---- data browser --------------------------------------------------------
+
+function renderDataset() {
+  const d = datasetInfo;
+  $("data-stats").textContent =
+    `${d.n} snippets · ${d.n_pos} positive / ${d.n_neg} negative · |V| = ${d.vocab}` +
+    ` · ${d.train_n} train / ${d.test_n} test · seed ${d.seed} · ${Math.round(d.noise * 100)}% label noise`;
+
+  const tokenTable = $("token-table");
+  tokenTable.textContent = "";
+  const thHead = document.createElement("tr");
+  thHead.appendChild(th("token"));
+  thHead.appendChild(th("positive", "num"));
+  thHead.appendChild(th("negative", "num"));
+  tokenTable.appendChild(thHead);
+  for (const t of d.token_stats) {
+    const tr = document.createElement("tr");
+    tr.appendChild(th(t.token));
+    tr.appendChild(cell(String(t.pos), "num"));
+    tr.appendChild(cell(String(t.neg), "num"));
+    tokenTable.appendChild(tr);
+  }
+
+  renderSnippets();
+}
+
+function renderSnippets() {
+  const d = datasetInfo;
+  const tok = filterToken.trim().toLowerCase();
+  const rows = d.snippets.filter((s) => {
+    if (filterClass !== "all" && String(s.label) !== filterClass) return false;
+    if (!tok) return true;
+    return s.text
+      .toLowerCase()
+      .split(/\s+/)
+      .some((w) => w.replace(/[^a-z0-9]/g, "") === tok);
+  });
+
+  const limit = 400;
+  const shown = rows.slice(0, limit);
+  const table = $("snippet-table");
+  table.textContent = "";
+  const head = document.createElement("tr");
+  head.appendChild(th("label"));
+  head.appendChild(th("sentence"));
+  head.appendChild(th("split"));
+  table.appendChild(head);
+  for (const s of shown) {
+    const tr = document.createElement("tr");
+    tr.className = `label-${s.label}`;
+    tr.appendChild(cell(s.label === 1 ? "positive" : "negative", "tag"));
+    tr.appendChild(cell(s.text));
+    tr.appendChild(cell(s.split, "split"));
+    table.appendChild(tr);
+  }
+  $("data-count").textContent =
+    `${shown.length} of ${rows.length} shown` + (rows.length > limit ? ` (first ${limit})` : "");
+}
+
+// ---- trace ---------------------------------------------------------------
 
 function renderTrace(t) {
   const out = $("trace-out");
@@ -217,26 +305,20 @@ function renderTrace(t) {
   const t1 = document.createElement("table");
   const r1 = document.createElement("tr");
   r1.appendChild(document.createElement("th"));
-  for (let j = 0; j < hidden; j++) {
-    const th = document.createElement("th");
-    th.textContent = `h${j}`;
-    r1.appendChild(th);
-  }
+  for (let j = 0; j < hidden; j++) r1.appendChild(th(`h${j}`));
   t1.appendChild(r1);
   for (const pt of t.per_token) {
     const tr = document.createElement("tr");
-    const th = document.createElement("th");
-    th.textContent = pt.token;
-    tr.appendChild(th);
+    tr.appendChild(th(pt.token));
     for (const v of pt.col) tr.appendChild(cell(f3(v)));
     t1.appendChild(tr);
   }
   const bRow = document.createElement("tr");
-  bRow.appendChild(Object.assign(document.createElement("th"), { textContent: "b1" }));
+  bRow.appendChild(th("b1"));
   for (const v of t.b1) bRow.appendChild(cell(f3(v)));
   t1.appendChild(bRow);
   const zRow = document.createElement("tr");
-  zRow.appendChild(Object.assign(document.createElement("th"), { textContent: "z1" }));
+  zRow.appendChild(th("z1"));
   for (const v of t.z1) zRow.appendChild(cell(f3(v)));
   t1.appendChild(zRow);
   out.appendChild(t1);
@@ -247,11 +329,7 @@ function renderTrace(t) {
   const t2 = document.createElement("table");
   const r2 = document.createElement("tr");
   r2.appendChild(document.createElement("th"));
-  for (let j = 0; j < hidden; j++) {
-    const th = document.createElement("th");
-    th.textContent = `h${j}`;
-    r2.appendChild(th);
-  }
+  for (let j = 0; j < hidden; j++) r2.appendChild(th(`h${j}`));
   t2.appendChild(r2);
   for (const [label, row] of [
     ["h = tanh(z1)", t.h],
@@ -259,7 +337,7 @@ function renderTrace(t) {
     ["h · W2", t.per_unit_z2],
   ]) {
     const tr = document.createElement("tr");
-    tr.appendChild(Object.assign(document.createElement("th"), { textContent: label }));
+    tr.appendChild(th(label));
     for (const v of row) tr.appendChild(cell(f3(v)));
     t2.appendChild(tr);
   }
@@ -279,6 +357,8 @@ function trace() {
     renderTrace(JSON.parse(readOut()));
   });
 }
+
+// ---- export / round-trip -------------------------------------------------
 
 function exportOnnx() {
   const len = ex.trot_export_onnx();
@@ -300,24 +380,94 @@ function exportOnnx() {
     `input      input float32[batch, ${state.vocab}]\n` +
     `output     probability float32[batch, 1]\n` +
     `weights    ${state.params} params, trained for ${state.step} steps`;
+  return len;
 }
+
+function loadOrt() {
+  if (window.ort) return Promise.resolve(window.ort);
+  if (ortPromise) return ortPromise;
+  ortPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = `${ORT_BASE}ort.min.js`;
+    s.onload = () => {
+      const ort = window.ort;
+      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.wasmPaths = ORT_BASE;
+      resolve(ort);
+    };
+    s.onerror = () => reject(new Error("could not load onnxruntime-web from the CDN"));
+    document.head.appendChild(s);
+  });
+  return ortPromise;
+}
+
+async function roundtrip() {
+  const status = $("rt-status");
+  status.className = "muted";
+  status.textContent = "loading onnxruntime-web…";
+  try {
+    const ort = await loadOrt();
+    const len = ex.trot_export_onnx();
+    const modelBytes = readOutBytes();
+    ex.trot_roundtrip_json();
+    const ref = JSON.parse(readOut());
+    const n = ref.n;
+    const v = ref.vocab;
+    const flat = new Float32Array(n * v);
+    for (let i = 0; i < n; i++) flat.set(ref.inputs[i], i * v);
+
+    status.textContent = `running ${n} test-set predictions through onnxruntime-web…`;
+    const tensor = new ort.Tensor("float32", flat, [n, v]);
+    const session = await ort.InferenceSession.create(modelBytes, {
+      executionProviders: ["wasm"],
+    });
+    const out = await session.run({ input: tensor });
+    const got = out.probability.data;
+    let maxDiff = 0;
+    for (let i = 0; i < n; i++) maxDiff = Math.max(maxDiff, Math.abs(got[i] - ref.probs[i]));
+    await session.release?.();
+
+    const pass = maxDiff <= 1e-6;
+    status.className = pass ? "pass" : "fail";
+    status.textContent =
+      `${pass ? "PASS" : "FAIL"} · ${n} predictions · ${len} bytes · ` +
+      `max |Rust − onnxruntime-web| = ${maxDiff.toExponential(2)}`;
+  } catch (err) {
+    status.className = "fail";
+    status.textContent = `round-trip failed: ${err.message || err}`;
+    console.error(err);
+  }
+}
+
+// ---- wiring --------------------------------------------------------------
 
 function bind() {
   $("btn-1").onclick = () => train(1);
   $("btn-10").onclick = () => train(10);
   $("btn-100").onclick = () => train(100);
   $("btn-reset").onclick = () => {
-    ex.trot_init(42);
+    // Reset the model over the *active* corpus (use Regenerate to change it).
+    ex.trot_init(datasetInfo.seed, datasetInfo.n, datasetInfo.noise);
     prevW1 = null;
     refresh(false);
   };
+  $("btn-regen").onclick = regenerate;
   $("btn-trace").onclick = trace;
   $("trace-text").onkeydown = (e) => {
     if (e.key === "Enter") trace();
   };
   $("btn-export").onclick = exportOnnx;
+  $("btn-roundtrip").onclick = roundtrip;
   $("lr").oninput = (e) => {
     $("lr-out").textContent = parseFloat(e.target.value).toFixed(2);
+  };
+  $("filter-class").onchange = (e) => {
+    filterClass = e.target.value;
+    renderSnippets();
+  };
+  $("filter-token").oninput = (e) => {
+    filterToken = e.target.value;
+    renderSnippets();
   };
 }
 

@@ -49,6 +49,15 @@
             <input id="batch" type="number" min="1" max="64" value="16" />
           </label>
         </div>
+        <div class="fields corpus">
+          <label>seed <input id="seed" type="number" min="0" value="42" /></label>
+          <label>sentences <input id="corpus-n" type="number" min="100" max="5000" step="1" value="256" /></label>
+          <label class="check">
+            <input id="noise" type="checkbox" checked />
+            ~8% label noise
+          </label>
+          <button id="btn-regen" class="ghost">Regenerate</button>
+        </div>
         <div class="metrics">
           <div><span class="k">step</span><span class="v" id="m-step">0</span></div>
           <div><span class="k">loss</span><span class="v" id="m-loss">—</span></div>
@@ -67,10 +76,47 @@
           struct fields. Open it in <a href="https://netron.app/">Netron</a>.
         </p>
         <pre class="summary" id="export-summary">not exported yet</pre>
+        <div class="controls">
+          <button id="btn-roundtrip" class="ghost">Round-trip check</button>
+        </div>
+        <p class="muted" id="rt-status">
+          Loads the exported bytes into <code>onnxruntime-web</code> (CDN, this view only) and
+          compares every test-set prediction with the in-browser model.
+        </p>
+      </section>
+
+      <section class="panel wide" id="panel-data">
+        <h2>3 · Data</h2>
+        <p class="muted" id="data-stats"></p>
+        <div class="controls">
+          <label>
+            class
+            <select id="filter-class">
+              <option value="all">all</option>
+              <option value="1">positive</option>
+              <option value="0">negative</option>
+            </select>
+          </label>
+          <input
+            id="filter-token"
+            type="text"
+            placeholder="filter by token (e.g. service)"
+            aria-label="filter snippets by token"
+          />
+          <span class="muted" id="data-count"></span>
+        </div>
+        <div class="data-grid">
+          <div class="scroll tall">
+            <table class="data-table" id="snippet-table"></table>
+          </div>
+          <div class="scroll tall">
+            <table class="data-table" id="token-table"></table>
+          </div>
+        </div>
       </section>
 
       <section class="panel wide" id="panel-weights">
-        <h2>3 · Weights</h2>
+        <h2>4 · Weights</h2>
         <p class="muted">
           <code>W1</code> is <span id="w1-shape">H × V</span> — one row per hidden unit, one column
           per vocabulary token. Cells flash when they move.
@@ -84,7 +130,7 @@
       </section>
 
       <section class="panel wide" id="panel-trace">
-        <h2>4 · Trace a prediction</h2>
+        <h2>5 · Trace a prediction</h2>
         <div class="controls">
           <input id="trace-text" type="text" value="the service was great" aria-label="sentence to classify" />
           <button id="btn-trace">Trace</button>

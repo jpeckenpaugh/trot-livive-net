@@ -62,9 +62,38 @@ impl Dataset {
         }
     }
 
-    /// 256 generated sentences (128 positive, 128 negative), seeded.
+    /// Deterministically generated corpus with the default label noise.
     pub fn generated(seed: u64, n: usize) -> Self {
-        Self::from_snippets(generator::generate(seed, n), seed)
+        Self::generated_with(seed, n, generator::NOISE)
+    }
+
+    /// Deterministically generated corpus with a configurable label-noise rate.
+    pub fn generated_with(seed: u64, n: usize, noise: f32) -> Self {
+        Self::from_snippets(generator::generate_with_noise(seed, n, noise), seed)
+    }
+
+    /// True if the snippet at `index` is in the test split.
+    pub fn is_test(&self, index: usize) -> bool {
+        self.test_idx.binary_search(&index).is_ok()
+    }
+
+    /// Positive/negative snippet counts for each vocabulary token.
+    pub fn token_stats(&self) -> Vec<(usize, usize)> {
+        let mut stats = vec![(0usize, 0usize); self.vocab.len()];
+        for s in &self.snippets {
+            let x = self.vectorize(&s.text);
+            let slot = if s.label == 1 { 0 } else { 1 };
+            for (i, &v) in x.iter().enumerate() {
+                if v != 0.0 {
+                    if slot == 0 {
+                        stats[i].0 += 1;
+                    } else {
+                        stats[i].1 += 1;
+                    }
+                }
+            }
+        }
+        stats
     }
 
     pub fn vocab_len(&self) -> usize {

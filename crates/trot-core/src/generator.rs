@@ -91,8 +91,15 @@ fn sentence(rng: &mut Rng, positive: bool) -> String {
 }
 
 /// Generate `n` labeled sentences, half positive and half negative, deterministic
-/// in `seed`.
+/// in `seed`, with the default amount of deliberate label noise.
 pub fn generate(seed: u64, n: usize) -> Vec<Snippet> {
+    generate_with_noise(seed, n, NOISE)
+}
+
+/// Generate `n` labeled sentences with `noise` in `[0, 1]` — the fraction of
+/// labels flipped (balanced across classes, so the 50/50 split is preserved).
+pub fn generate_with_noise(seed: u64, n: usize, noise: f32) -> Vec<Snippet> {
+    let noise = noise.clamp(0.0, 1.0);
     let mut rng = Rng::new(seed);
     let mut out: Vec<Snippet> = Vec::with_capacity(n);
     for i in 0..n {
@@ -108,10 +115,10 @@ pub fn generate(seed: u64, n: usize) -> Vec<Snippet> {
         out.swap(i, j);
     }
 
-    // Deliberate label noise (~8%, balanced): the model can memorize the
-    // training set but cannot reach a perfect test score. This is the
-    // generalization gap made visible. Class counts stay 50/50.
-    let per_class = ((n as f32) * NOISE / 2.0).round() as usize;
+    // Deliberate label noise (balanced): the model can memorize the training
+    // set but cannot reach a perfect test score. This is the generalization gap
+    // made visible. Class counts stay 50/50.
+    let per_class = ((n as f32) * noise / 2.0).round() as usize;
     let mut p = 0;
     let mut neg = 0;
     for s in out.iter_mut() {

@@ -15,11 +15,17 @@ hidden.
   hand-written loops with index comments. No `ndarray`, no `burn`, no autodiff.
 - **The data is the code.** The 256-sentence corpus is `f(seed)` over the
   template grammar in `generator.rs` — 128 positive, 128 negative, ~8% of labels
-  deliberately flipped so train and test accuracy diverge. No dataset blob.
+  deliberately flipped so train and test accuracy diverge. Seed, corpus size
+  (100–5,000), and the noise toggle are on the page; no dataset blob.
 - **The artifact is inspectable too.** The `.onnx` is written by a ~200-line
   hand-rolled protobuf encoder (`onnx.rs`): four nodes, opset 13, IR 8,
   initializers named `W1`, `b1`, `W2`, `b2`. It opens in
   [Netron](https://netron.app/) and reads like the source.
+- **The export is verified in place.** *Round-trip check* loads the exported
+  bytes into `onnxruntime-web` (CDN, on demand) and compares every test-set
+  prediction against the in-browser model.
+- **The corpus is browsable.** The Data panel lists all generated snippets with
+  class/token filters, split membership, and per-token positive/negative counts.
 
 ## Architecture
 
