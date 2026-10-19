@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TROT — Transparent Rust ONNX Trainer</title>
+    <meta
+      name="description"
+      content="A tiny neural network written from scratch in Rust, trained live in your browser, and exported to ONNX. Every number is on the page."
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <h1>TROT</h1>
+        <span class="sub">Transparent Rust ONNX Trainer</span>
+      </div>
+      <p class="tagline">
+        A tiny MLP written from scratch in Rust — forward pass, backward pass, weight update —
+        compiled to WebAssembly. Train it here, trace a prediction number by number, then export
+        the result to ONNX. Nothing is hidden behind a library call.
+      </p>
+      <nav>
+        <a href="https://github.com/jpeckenpaugh/trot-livive-net">source</a>
+        <span id="params">·</span>
+        <span id="build">·</span>
+      </nav>
+    </header>
+
+    <main>
+      <section class="panel" id="panel-train">
+        <h2>1 · Train</h2>
+        <p class="muted" id="dataset-line">loading…</p>
+        <div class="controls">
+          <button id="btn-1">Train 1</button>
+          <button id="btn-10">Train 10</button>
+          <button id="btn-100">Train 100</button>
+          <button id="btn-reset" class="ghost">Reset</button>
+        </div>
+        <div class="fields">
+          <label>
+            learning rate
+            <input id="lr" type="range" min="0.01" max="1" step="0.01" value="0.3" />
+            <output id="lr-out">0.30</output>
+          </label>
+          <label>
+            batch size
+            <input id="batch" type="number" min="1" max="64" value="16" />
+          </label>
+        </div>
+        <div class="metrics">
+          <div><span class="k">step</span><span class="v" id="m-step">0</span></div>
+          <div><span class="k">loss</span><span class="v" id="m-loss">—</span></div>
+          <div><span class="k">train acc</span><span class="v good" id="m-train">—</span></div>
+          <div><span class="k">test acc</span><span class="v good" id="m-test">—</span></div>
+        </div>
+        <canvas id="loss" height="120" aria-label="loss curve"></canvas>
+      </section>
+
+      <section class="panel" id="panel-export">
+        <h2>2 · Export</h2>
+        <button id="btn-export">Export .onnx</button>
+        <p class="muted" id="export-note">
+          A real ONNX file written by the Rust core: four nodes
+          (<code>Gemm → Tanh → Gemm → Sigmoid</code>), opset 13, IR 8, initializers named after the
+          struct fields. Open it in <a href="https://netron.app/">Netron</a>.
+        </p>
+        <pre class="summary" id="export-summary">not exported yet</pre>
+      </section>
+
+      <section class="panel wide" id="panel-weights">
+        <h2>3 · Weights</h2>
+        <p class="muted">
+          <code>W1</code> is <span id="w1-shape">H × V</span> — one row per hidden unit, one column
+          per vocabulary token. Cells flash when they move.
+        </p>
+        <div class="scroll">
+          <table class="weights" id="w1"></table>
+        </div>
+        <div class="small-weights">
+          <table class="weights" id="b1w2"></table>
+        </div>
+      </section>
+
+      <section class="panel wide" id="panel-trace">
+        <h2>4 · Trace a prediction</h2>
+        <div class="controls">
+          <input id="trace-text" type="text" value="the service was great" aria-label="sentence to classify" />
+          <button id="btn-trace">Trace</button>
+        </div>
+        <div id="trace-out" class="trace muted">train the model, then trace a sentence.</div>
+      </section>
+    </main>
+
+    <footer>
+      <span
+        >The model is the code. The data is the code. The artifact is inspectable too.</span
+      >
+    </footer>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

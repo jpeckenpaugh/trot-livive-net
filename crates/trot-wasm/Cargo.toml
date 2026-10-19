@@ -1,0 +1,12 @@
+[package]
+name = "trot-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Raw WebAssembly boundary for the TROT transparent trainer."
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+trot-core = { path = "../trot-core" }

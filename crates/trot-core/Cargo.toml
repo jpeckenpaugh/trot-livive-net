@@ -1,0 +1,8 @@
+[package]
+name = "trot-core"
+version = "0.1.0"
+edition = "2021"
+description = "Transparent Rust ONNX Trainer — tiny MLP, from scratch, exportable to ONNX."
+license = "MIT"
+
+[dependencies]
