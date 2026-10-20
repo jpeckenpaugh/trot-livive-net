@@ -1,0 +1,11 @@
+{
+  "name": "trot-livive-net-showcase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "showcase": "node scripts/record-showcase.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1"
+  }
+}

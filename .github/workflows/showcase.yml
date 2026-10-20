@@ -1,0 +1,65 @@
+name: showcase
+
+# Records a 30s demo video, a 16:10 thumbnail, and labeled gallery stills into
+# demos/latest/. Manual dispatch only: showcase media is large and only needs
+# to change when the product visibly changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Commit demos/latest back to main
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: showcase-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - name: Install Chromium + ffmpeg
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Verify the committed wasm artifact
+        run: node scripts/check_wasm.mjs trot.wasm
+
+      - name: Record showcase
+        run: npm run showcase
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: showcase
+          path: demos/latest
+          retention-days: 30
+
+      - name: Commit showcase media
+        if: inputs.commit
+        run: |
+          git config user.name "livive-showcase[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add demos/latest
+          git commit -m "chore(showcase): refresh demo media [skip ci]" || exit 0
+          git push

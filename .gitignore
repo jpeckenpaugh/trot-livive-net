@@ -1,1 +1,4 @@
 /target
+
+# Showcase recorder dependencies
+node_modules/
