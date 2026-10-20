@@ -419,3 +419,135 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- S3: activations, L2, gradients, flips, ONNX anatomy ---------------- */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input[type="range"]:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.formula {
+  margin: 6px 0 0;
+  max-width: 78ch;
+}
+
+.loss-equation {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  margin: 4px 0 8px;
+  font-family: var(--mono);
+  font-size: 15px;
+}
+
+.loss-equation #m-bce,
+.loss-equation #m-penalty,
+.loss-equation #m-total {
+  color: var(--accent);
+  min-width: 4.5ch;
+  display: inline-block;
+}
+
+.noise-note {
+  margin: 8px 0 0;
+  max-width: 80ch;
+}
+
+.flip-cell {
+  white-space: nowrap;
+}
+
+.flip-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--flash);
+  border-radius: 999px;
+  color: var(--flash);
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.grad-meta {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: 6px 0 8px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.grad-rule {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--accent);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.grad-detail {
+  min-height: 1.6em;
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+table.grad-table td.grad-cell {
+  cursor: crosshair;
+}
+
+table.grad-table td.grad-cell:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  position: relative;
+  z-index: 1;
+}
+
+table.anatomy {
+  margin-top: 12px;
+}
+
+table.anatomy th {
+  position: static;
+  width: 150px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+table.anatomy td {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.trace-act {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
