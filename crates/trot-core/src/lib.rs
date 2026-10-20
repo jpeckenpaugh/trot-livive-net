@@ -16,3 +16,6 @@ pub mod model;
 pub mod onnx;
 pub mod rng;
 pub mod train;
+
+pub use data::{tokenize, Dataset, Snippet};
+pub use generator::{generate, generate_with_noise, LEXICON, NOISE, NOISE_PRESET};

@@ -226,10 +226,11 @@ pub extern "C" fn trot_dataset_json() {
             snippets.push(',');
         }
         snippets.push_str(&format!(
-            "{{\"text\":\"{}\",\"label\":{},\"split\":\"{}\"}}",
+            "{{\"text\":\"{}\",\"label\":{},\"split\":\"{}\",\"flipped\":{}}}",
             esc(&sn.text),
             sn.label,
-            if s.ds.is_test(i) { "test" } else { "train" }
+            if s.ds.is_test(i) { "test" } else { "train" },
+            sn.flipped
         ));
     }
     snippets.push(']');

@@ -6,13 +6,14 @@ use crate::rng::Rng;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snippet {
     pub text: String,
-    pub label: u8, // 0 = negative, 1 = positive
+    pub label: u8,     // 0 = negative, 1 = positive (after intentional flips)
+    pub flipped: bool, // true iff this label came from intentional noise
 }
 
 #[derive(Clone, Debug)]
 pub struct Dataset {
     pub snippets: Vec<Snippet>,
-    pub vocab: Vec<String>, // sorted, unique
+    pub vocab: Vec<String>, // fixed 50-token lexicon, sorted
     pub train_idx: Vec<usize>,
     pub test_idx: Vec<usize>,
 }
@@ -31,16 +32,14 @@ pub fn tokenize(text: &str) -> Vec<String> {
 }
 
 impl Dataset {
-    /// Build a dataset from snippets: derive vocab, then split 80/20 with a seed.
+    /// Build a dataset from snippets: use the fixed lexicon, then split 80/20.
     pub fn from_snippets(snippets: Vec<Snippet>, seed: u64) -> Self {
-        let mut vocab: Vec<String> = Vec::new();
-        for s in &snippets {
-            for t in tokenize(&s.text) {
-                vocab.push(t);
-            }
-        }
-        vocab.sort();
-        vocab.dedup();
+        // The vocabulary is the v3 lexicon, not the tokens observed in this
+        // sample, so `V = 50` and `W1` is 8x50 for every seed and corpus size.
+        let vocab: Vec<String> = generator::LEXICON
+            .iter()
+            .map(|token| (*token).to_string())
+            .collect();
 
         let mut order: Vec<usize> = (0..snippets.len()).collect();
         let mut rng = Rng::new(seed ^ 0x5EED_5EED);
