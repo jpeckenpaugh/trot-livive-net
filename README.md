@@ -107,9 +107,17 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld \
 ```sh
 cargo test -p trot-core        # forward vs hand-computed, gradient checks,
                                # learning, determinism, generator bounds, onnx smoke
+cargo test -p trot-core --test activation_matrix   # 3 activations × L2 off/on
+cargo run -p trot-core --example corpus_audit -- 42 256 0.0
+cargo run -p trot-core --example corpus_audit -- 42 256 0.08
+node scripts/check_wasm.mjs    # committed trot.wasm: ABI, activations, export, trace
 cargo run --release -p trot-core --example export_onnx
 python3 scripts/validate_onnx.py
 ```
+
+CI runs the full suite, both corpus audits, the activation × L2 matrix (one job
+per cell), a smoke test of the freshly built and committed wasm, and the ONNX
+round-trip for all three activations.
 
 `export_onnx` trains the default corpus for each activation and writes
 `target/trot_tanh.onnx`, `target/trot_relu.onnx`, and
