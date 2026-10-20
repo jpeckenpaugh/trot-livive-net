@@ -1,14 +1,17 @@
 use trot_core::data::Dataset;
 use trot_core::generator;
-use trot_core::model::Model;
+use trot_core::model::{Activation, Model, LEAKY_ALPHA};
 use trot_core::onnx;
 use trot_core::rng::Rng;
 use trot_core::train;
 
-fn tiny() -> Model {
+const ACTIVATIONS: [Activation; 3] = [Activation::Tanh, Activation::ReLU, Activation::LeakyReLU];
+
+fn tiny(activation: Activation) -> Model {
     Model {
         hidden: 2,
         vocab: 3,
+        activation,
         w1: vec![1.0, 0.0, -1.0, 0.5, -0.5, 2.0],
         b1: vec![0.1, -0.2],
         w2: vec![0.7, -0.3],
@@ -16,66 +19,218 @@ fn tiny() -> Model {
     }
 }
 
-#[test]
-fn forward_hand_computed() {
-    let m = tiny();
-    let f = m.forward(&[1.0, 0.0, 1.0]);
-    let h0 = 0.1f32.tanh();
-    let h1 = 2.3f32.tanh();
-    let z2 = 0.05 + 0.7 * h0 - 0.3 * h1;
-    let p = 1.0 / (1.0 + (-z2).exp());
-    assert!((f.z1[0] - 0.1).abs() < 1e-6);
-    assert!((f.z1[1] - 2.3).abs() < 1e-6);
-    assert!((f.h[0] - h0).abs() < 1e-6);
-    assert!((f.z2 - z2).abs() < 1e-6);
-    assert!((f.p - p).abs() < 1e-6);
+fn total_loss(m: &Model, x: &[f32], y: u8, lambda: f32) -> f32 {
+    m.loss(x, y) + train::penalty(m, lambda)
+}
+
+fn assert_close(a: f32, b: f32, what: &str) {
+    assert!((a - b).abs() < 1e-6, "{what}: {a} vs {b}");
 }
 
 #[test]
-fn gradient_check() {
-    let mut rng = Rng::new(7);
-    let mut m = Model::new(4, 3, &mut rng);
-    let x = [1.0, 0.0, 1.0, 1.0];
+fn activation_forward_hand_computed() {
+    // x = [0, 0, 1] gives z1 = [-0.9, 1.8]; both branches are exercised.
+    let x = [0.0, 0.0, 1.0];
+    for activation in ACTIVATIONS {
+        let m = tiny(activation);
+        let f = m.forward(&x);
+        assert_close(f.z1[0], -0.9, "z1[0]");
+        assert_close(f.z1[1], 1.8, "z1[1]");
+
+        let (h0, h1, d0, d1) = match activation {
+            Activation::Tanh => (
+                (-0.9f32).tanh(),
+                1.8f32.tanh(),
+                1.0 - (-0.9f32).tanh().powi(2),
+                1.0 - 1.8f32.tanh().powi(2),
+            ),
+            Activation::ReLU => (0.0, 1.8, 0.0, 1.0),
+            Activation::LeakyReLU => (LEAKY_ALPHA * -0.9, 1.8, LEAKY_ALPHA, 1.0),
+        };
+        assert_close(f.h[0], h0, "h[0]");
+        assert_close(f.h[1], h1, "h[1]");
+        assert_close(f.dact[0], d0, "dact[0]");
+        assert_close(f.dact[1], d1, "dact[1]");
+
+        let z2 = 0.05 + 0.7 * h0 - 0.3 * h1;
+        let p = 1.0 / (1.0 + (-z2).exp());
+        assert_close(f.z2, z2, "z2");
+        assert_close(f.p, p, "p");
+    }
+}
+
+#[test]
+fn activation_edge_behavior_and_codes() {
+    assert_eq!(Activation::Tanh.activate(0.0), 0.0);
+    assert_eq!(Activation::Tanh.derivative(0.0), 1.0);
+    assert_eq!(Activation::ReLU.activate(0.0), 0.0);
+    assert_eq!(Activation::ReLU.derivative(0.0), 0.0);
+    assert_eq!(Activation::LeakyReLU.activate(0.0), 0.0);
+    assert_eq!(Activation::LeakyReLU.derivative(0.0), LEAKY_ALPHA);
+    assert_close(Activation::LeakyReLU.activate(-2.0), -0.02, "leaky(-2)");
+
+    assert_eq!(Activation::from_code(0), Activation::Tanh);
+    assert_eq!(Activation::from_code(1), Activation::ReLU);
+    assert_eq!(Activation::from_code(2), Activation::LeakyReLU);
+    assert_eq!(Activation::from_code(99), Activation::Tanh);
+    assert_eq!(Activation::Tanh.id(), "tanh");
+    assert_eq!(Activation::ReLU.id(), "relu");
+    assert_eq!(Activation::LeakyReLU.id(), "leaky_relu");
+    assert_eq!(Activation::LeakyReLU.onnx_node(), "LeakyRelu");
+}
+
+fn check_gradient(activation: Activation, lambda: f32) {
+    let mut m = tiny(activation);
+    let x = [0.0, 0.0, 1.0];
     let y = 1u8;
     let f = m.forward(&x);
-    let g = train::backward(&m, &f, y);
+    let mut g = train::backward(&m, &f, y);
+    train::add_l2(&m, &mut g, lambda);
     let eps = 1e-3f32;
 
-    // Check every weight by central difference.
-    let mut numeric = Vec::new();
     for k in 0..m.w1.len() {
         let orig = m.w1[k];
         m.w1[k] = orig + eps;
-        let lp = m.loss(&x, y);
+        let lp = total_loss(&m, &x, y, lambda);
         m.w1[k] = orig - eps;
-        let lm = m.loss(&x, y);
+        let lm = total_loss(&m, &x, y, lambda);
         m.w1[k] = orig;
-        numeric.push((lp - lm) / (2.0 * eps));
-    }
-    for (n, a) in numeric.iter().zip(g.w1.iter()) {
-        assert!((n - a).abs() < 1e-3, "w1 grad {n} vs {a}");
+        let numeric = (lp - lm) / (2.0 * eps);
+        assert!(
+            (numeric - g.w1[k]).abs() < 1e-3,
+            "{}: w1[{k}] grad {numeric} vs {}",
+            activation.id(),
+            g.w1[k]
+        );
     }
 
     for j in 0..m.b1.len() {
         let orig = m.b1[j];
         m.b1[j] = orig + eps;
-        let lp = m.loss(&x, y);
+        let lp = total_loss(&m, &x, y, lambda);
         m.b1[j] = orig - eps;
-        let lm = m.loss(&x, y);
+        let lm = total_loss(&m, &x, y, lambda);
         m.b1[j] = orig;
-        let n = (lp - lm) / (2.0 * eps);
-        assert!((n - g.b1[j]).abs() < 1e-3, "b1 grad {n} vs {}", g.b1[j]);
+        let numeric = (lp - lm) / (2.0 * eps);
+        assert!(
+            (numeric - g.b1[j]).abs() < 1e-3,
+            "{}: b1[{j}] grad {numeric} vs {}",
+            activation.id(),
+            g.b1[j]
+        );
     }
 
     for j in 0..m.w2.len() {
         let orig = m.w2[j];
         m.w2[j] = orig + eps;
-        let lp = m.loss(&x, y);
+        let lp = total_loss(&m, &x, y, lambda);
         m.w2[j] = orig - eps;
-        let lm = m.loss(&x, y);
+        let lm = total_loss(&m, &x, y, lambda);
         m.w2[j] = orig;
-        let n = (lp - lm) / (2.0 * eps);
-        assert!((n - g.w2[j]).abs() < 1e-3, "w2 grad {n} vs {}", g.w2[j]);
+        let numeric = (lp - lm) / (2.0 * eps);
+        assert!(
+            (numeric - g.w2[j]).abs() < 1e-3,
+            "{}: w2[{j}] grad {numeric} vs {}",
+            activation.id(),
+            g.w2[j]
+        );
+    }
+
+    let orig = m.b2;
+    m.b2 = orig + eps;
+    let lp = total_loss(&m, &x, y, lambda);
+    m.b2 = orig - eps;
+    let lm = total_loss(&m, &x, y, lambda);
+    m.b2 = orig;
+    let numeric = (lp - lm) / (2.0 * eps);
+    assert!(
+        (numeric - g.b2).abs() < 1e-3,
+        "{}: b2 grad {numeric} vs {}",
+        activation.id(),
+        g.b2
+    );
+}
+
+#[test]
+fn gradient_check_all_activations() {
+    for activation in ACTIVATIONS {
+        check_gradient(activation, 0.0);
+    }
+}
+
+#[test]
+fn l2_gradient_check_all_activations() {
+    for activation in ACTIVATIONS {
+        check_gradient(activation, 0.05);
+    }
+}
+
+#[test]
+fn loss_penalty_decomposition_and_last_gradients() {
+    let mut ds = Dataset::generated(7, 100);
+    ds.train_idx = vec![0];
+    ds.test_idx = Vec::new();
+
+    for activation in ACTIVATIONS {
+        let mut m = Model::with_activation(ds.vocab_len(), 3, activation, &mut Rng::new(3));
+        let before = m.clone();
+        let mut rng = Rng::new(9);
+        let lambda = 0.05f32;
+        let lr = 0.1f32;
+        let report = train::minibatch_step(&mut m, &ds, &mut rng, 1, lr, lambda);
+
+        let s = &ds.snippets[0];
+        let x = ds.vectorize(&s.text);
+        let bce = before.loss(&x, s.label);
+        let penalty = train::penalty(&before, lambda);
+        assert_close(report.bce, bce, "bce");
+        assert_close(report.penalty, penalty, "penalty");
+        assert_close(report.total, bce + penalty, "total");
+
+        let f = before.forward(&x);
+        let bce_grad = train::backward(&before, &f, s.label);
+        for k in 0..before.w1.len() {
+            let expected = bce_grad.w1[k] + lambda * before.w1[k];
+            assert_close(report.gradients.w1[k], expected, "dW1 includes lambda*W1");
+            assert_close(
+                m.w1[k],
+                before.w1[k] - lr * expected,
+                "W1 follows theta - lr*dtheta",
+            );
+        }
+        for j in 0..before.w2.len() {
+            let expected = bce_grad.w2[j] + lambda * before.w2[j];
+            assert_close(report.gradients.w2[j], expected, "dW2 includes lambda*W2");
+            assert_close(
+                m.w2[j],
+                before.w2[j] - lr * expected,
+                "W2 follows theta - lr*dtheta",
+            );
+        }
+        for j in 0..before.b1.len() {
+            assert_close(report.gradients.b1[j], bce_grad.b1[j], "db1 has no L2");
+        }
+        assert_close(report.gradients.b2, bce_grad.b2, "db2 has no L2");
+    }
+}
+
+#[test]
+fn zero_lambda_reports_no_penalty() {
+    let mut ds = Dataset::generated(7, 100);
+    ds.train_idx = vec![0];
+    ds.test_idx = Vec::new();
+    let mut m = Model::new(ds.vocab_len(), 3, &mut Rng::new(3));
+    let before = m.clone();
+    let report = train::minibatch_step(&mut m, &ds, &mut Rng::new(9), 1, 0.1, 0.0);
+    assert_eq!(report.penalty, 0.0);
+    assert_close(report.total, report.bce, "total == bce");
+
+    let s = &ds.snippets[0];
+    let x = ds.vectorize(&s.text);
+    let f = before.forward(&x);
+    let g = train::backward(&before, &f, s.label);
+    for (a, b) in report.gradients.w1.iter().zip(g.w1.iter()) {
+        assert_close(*a, *b, "dW1 without L2");
     }
 }
 
@@ -126,39 +281,157 @@ fn loss_decreases_and_learns() {
     let ds = Dataset::generated(42, 256);
     let mut rng = Rng::new(42);
     let mut m = Model::new(ds.vocab_len(), 8, &mut rng);
-    let (_, initial) = train::evaluate(&m, &ds, &ds.train_idx);
+    let (_, initial) = train::evaluate(&m, &ds, &ds.train_idx, 0.0);
     for _ in 0..400 {
-        train::minibatch_step(&mut m, &ds, &mut rng, 16, 0.3);
+        train::minibatch_step(&mut m, &ds, &mut rng, 16, 0.3, 0.0);
     }
-    let (train_acc, final_loss) = train::evaluate(&m, &ds, &ds.train_idx);
+    let (train_acc, final_loss) = train::evaluate(&m, &ds, &ds.train_idx, 0.0);
     assert!(final_loss < initial * 0.6, "loss {initial} -> {final_loss}");
     assert!(train_acc > 0.8, "train acc {train_acc}");
 }
 
-#[test]
-fn onnx_export_smoke() {
-    let ds = Dataset::generated(42, 256);
-    let mut rng = Rng::new(42);
-    let mut m = Model::new(ds.vocab_len(), 8, &mut rng);
-    for _ in 0..100 {
-        train::minibatch_step(&mut m, &ds, &mut rng, 16, 0.3);
+// ---- minimal protobuf reader for ONNX assertions -------------------------
+
+enum FieldValue<'a> {
+    Varint(u64),
+    Bytes(&'a [u8]),
+    Float(f32),
+}
+
+fn read_varint(buf: &[u8], pos: &mut usize) -> u64 {
+    let mut shift = 0;
+    let mut value = 0u64;
+    loop {
+        let b = buf[*pos];
+        *pos += 1;
+        value |= ((b & 0x7f) as u64) << shift;
+        if b & 0x80 == 0 {
+            return value;
+        }
+        shift += 7;
     }
-    let bytes = onnx::export(&m);
-    assert!(bytes.len() > 100);
-    for needle in [
-        "Gemm",
-        "Tanh",
-        "Sigmoid",
-        "W1",
-        "b1",
-        "W2",
-        "b2",
-        "input",
-        "probability",
-    ] {
-        assert!(
-            bytes.windows(needle.len()).any(|w| w == needle.as_bytes()),
-            "missing {needle}"
+}
+
+fn fields(buf: &[u8]) -> Vec<(u32, FieldValue<'_>)> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while pos < buf.len() {
+        let key = read_varint(buf, &mut pos);
+        let field = (key >> 3) as u32;
+        let wire = (key & 7) as u32;
+        let value = match wire {
+            0 => FieldValue::Varint(read_varint(buf, &mut pos)),
+            2 => {
+                let len = read_varint(buf, &mut pos) as usize;
+                let bytes = &buf[pos..pos + len];
+                pos += len;
+                FieldValue::Bytes(bytes)
+            }
+            5 => {
+                let bytes = &buf[pos..pos + 4];
+                pos += 4;
+                FieldValue::Float(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            }
+            other => panic!("unsupported wire type {other}"),
+        };
+        out.push((field, value));
+    }
+    out
+}
+
+fn bytes_for(buf: &[u8], field: u32) -> Vec<&[u8]> {
+    fields(buf)
+        .into_iter()
+        .filter_map(|(f, v)| match (f, v) {
+            (f, FieldValue::Bytes(b)) if f == field => Some(b),
+            _ => None,
+        })
+        .collect()
+}
+
+fn text(buf: &[u8]) -> String {
+    String::from_utf8(buf.to_vec()).expect("utf8")
+}
+
+fn node_ops(graph: &[u8]) -> Vec<String> {
+    bytes_for(graph, 1)
+        .into_iter()
+        .map(|n| text(bytes_for(n, 4)[0]))
+        .collect()
+}
+
+fn node_attrs(node: &[u8]) -> Vec<(String, Option<f32>, Option<u64>)> {
+    bytes_for(node, 5)
+        .into_iter()
+        .map(|a| {
+            let name = text(bytes_for(a, 1)[0]);
+            let mut value = None;
+            let mut kind = None;
+            for (f, v) in fields(a) {
+                match (f, v) {
+                    (2, FieldValue::Float(x)) => value = Some(x),
+                    (20, FieldValue::Varint(x)) => kind = Some(x),
+                    _ => {}
+                }
+            }
+            (name, value, kind)
+        })
+        .collect()
+}
+
+fn initializer_names(graph: &[u8]) -> Vec<String> {
+    bytes_for(graph, 5)
+        .into_iter()
+        .map(|t| text(bytes_for(t, 8)[0]))
+        .collect()
+}
+
+#[test]
+fn onnx_export_maps_each_activation() {
+    for activation in ACTIVATIONS {
+        let m = tiny(activation);
+        let bytes = onnx::export(&m);
+        assert!(bytes.len() > 100);
+        let model = fields(&bytes);
+        let graph = model
+            .iter()
+            .find_map(|(f, v)| match (f, v) {
+                (7, FieldValue::Bytes(b)) => Some(*b),
+                _ => None,
+            })
+            .expect("graph");
+
+        let ops = node_ops(graph);
+        assert_eq!(
+            ops,
+            vec![
+                "Gemm".to_string(),
+                activation.onnx_node().to_string(),
+                "Gemm".to_string(),
+                "Sigmoid".to_string()
+            ]
         );
+        assert_eq!(
+            initializer_names(graph),
+            vec![
+                "W1".to_string(),
+                "b1".to_string(),
+                "W2".to_string(),
+                "b2".to_string()
+            ]
+        );
+
+        let nodes = bytes_for(graph, 1);
+        let attrs = node_attrs(nodes[1]);
+        match activation {
+            Activation::Tanh | Activation::ReLU => assert!(attrs.is_empty(), "{attrs:?}"),
+            Activation::LeakyReLU => {
+                assert_eq!(attrs.len(), 1);
+                let (name, value, kind) = &attrs[0];
+                assert_eq!(name, "alpha");
+                assert_eq!(*kind, Some(1), "alpha must be a FLOAT attribute");
+                assert_eq!(value.map(f32::to_bits), Some(LEAKY_ALPHA.to_bits()));
+            }
+        }
     }
 }

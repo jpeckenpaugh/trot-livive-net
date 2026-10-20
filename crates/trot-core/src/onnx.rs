@@ -4,13 +4,13 @@
 //! fields, so the file reads like the source:
 //!
 //! ```text
-//! input [batch,V] → Gemm(W1,b1,transB=1) → Tanh → Gemm(W2,b2,transB=1) → Sigmoid → probability
+//! input [batch,V] → Gemm(W1,b1,transB=1) → Tanh|Relu|LeakyRelu → Gemm(W2,b2,transB=1) → Sigmoid → probability
 //! ```
 //!
 //! We encode only the ten protobuf messages the format actually needs. That is
 //! why the crate has zero dependencies.
 
-use crate::model::Model;
+use crate::model::{Activation, Model, LEAKY_ALPHA};
 
 pub const OPSET: i64 = 13;
 pub const IR_VERSION: i64 = 8;
@@ -48,6 +48,11 @@ fn field_bytes(out: &mut Vec<u8>, field: u32, bytes: &[u8]) {
     out.extend_from_slice(bytes);
 }
 
+fn field_float(out: &mut Vec<u8>, field: u32, value: f32) {
+    tag(out, field, 5);
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
 fn field_str(out: &mut Vec<u8>, field: u32, s: &str) {
     field_bytes(out, field, s.as_bytes());
 }
@@ -81,6 +86,14 @@ fn attr_int(name: &str, value: i64) -> Vec<u8> {
     a
 }
 
+fn attr_float(name: &str, value: f32) -> Vec<u8> {
+    let mut a = Vec::new();
+    field_str(&mut a, 1, name);
+    field_float(&mut a, 2, value);
+    field_varint(&mut a, 20, 1); // AttributeProto::FLOAT
+    a
+}
+
 fn node(op: &str, inputs: &[&str], outputs: &[&str], attrs: &[Vec<u8>]) -> Vec<u8> {
     let mut n = Vec::new();
     for i in inputs {
@@ -94,6 +107,13 @@ fn node(op: &str, inputs: &[&str], outputs: &[&str], attrs: &[Vec<u8>]) -> Vec<u
         field_msg(&mut n, 5, a);
     }
     n
+}
+
+fn activation_attrs(activation: Activation) -> Vec<Vec<u8>> {
+    match activation {
+        Activation::LeakyReLU => vec![attr_float("alpha", LEAKY_ALPHA)],
+        Activation::Tanh | Activation::ReLU => Vec::new(),
+    }
 }
 
 fn dimension(v: i64) -> Vec<u8> {
@@ -148,7 +168,12 @@ pub fn export(m: &Model) -> Vec<u8> {
         &["z1"],
         &[attr_int("transB", 1)],
     );
-    let tanh = node("Tanh", &["z1"], &["h"], &[]);
+    let activation = node(
+        m.activation.onnx_node(),
+        &["z1"],
+        &["h"],
+        &activation_attrs(m.activation),
+    );
     let gemm2 = node(
         "Gemm",
         &["h", "W2", "b2"],
@@ -156,7 +181,7 @@ pub fn export(m: &Model) -> Vec<u8> {
         &[attr_int("transB", 1)],
     );
     let sigmoid = node("Sigmoid", &["z2"], &[OUTPUT_NAME], &[]);
-    for n in [&gemm1, &tanh, &gemm2, &sigmoid] {
+    for n in [&gemm1, &activation, &gemm2, &sigmoid] {
         field_msg(&mut graph, 1, n);
     }
 

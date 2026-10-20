@@ -38,33 +38,64 @@
           <button id="btn-100">Train 100</button>
           <button id="btn-reset" class="ghost">Reset</button>
         </div>
-        <div class="fields">
-          <label>
-            learning rate
-            <input id="lr" type="range" min="0.01" max="1" step="0.01" value="0.3" />
-            <output id="lr-out">0.30</output>
+        <div class="fields model-config">
+          <label for="activation">activation
+            <select id="activation" aria-label="activation">
+              <option value="tanh" selected>tanh</option>
+              <option value="relu">relu</option>
+              <option value="leaky_relu">leaky_relu</option>
+            </select>
           </label>
-          <label>
-            batch size
+          <label class="check" for="l2">
+            <input id="l2" type="checkbox" />
+            L2 regularization
+          </label>
+          <label for="lambda">lambda
+            <input id="lambda" type="range" min="0" max="0.1" step="0.001" value="0" aria-label="L2 lambda" disabled />
+            <output id="lambda-out" for="lambda">0.000</output>
+          </label>
+        </div>
+        <p class="muted formula" id="lambda-formula">
+          penalty = (λ/2)(‖W1‖² + ‖W2‖²); biases are not penalized. Off means λ = 0.
+        </p>
+        <div class="fields">
+          <label for="lr">learning rate
+            <input id="lr" type="range" min="0.01" max="1" step="0.01" value="0.3" aria-label="learning rate" />
+            <output id="lr-out" for="lr">0.30</output>
+          </label>
+          <label for="batch">batch size
             <input id="batch" type="number" min="1" max="64" value="16" />
           </label>
         </div>
-        <div class="fields corpus">
-          <label>seed <input id="seed" type="number" min="0" value="42" /></label>
-          <label>sentences <input id="corpus-n" type="number" min="100" max="5000" step="1" value="256" /></label>
-          <label class="check">
-            <input id="noise" type="checkbox" checked />
-            ~8% label noise
-          </label>
-          <button id="btn-regen" class="ghost">Regenerate</button>
-        </div>
-        <div class="metrics">
+        <div class="metrics" aria-label="training metrics">
           <div><span class="k">step</span><span class="v" id="m-step">0</span></div>
-          <div><span class="k">loss</span><span class="v" id="m-loss">—</span></div>
           <div><span class="k">train acc</span><span class="v good" id="m-train">—</span></div>
           <div><span class="k">test acc</span><span class="v good" id="m-test">—</span></div>
         </div>
+        <p class="loss-equation" id="loss-equation" aria-live="polite">
+          BCE <span id="m-bce">—</span> + penalty <span id="m-penalty">—</span> = total
+          <span id="m-total">—</span>
+        </p>
         <canvas id="loss" height="120" aria-label="loss curve"></canvas>
+        <div class="fields corpus">
+          <label for="seed">seed
+            <input id="seed" type="number" min="0" value="42" />
+          </label>
+          <label for="corpus-n">sentences
+            <input id="corpus-n" type="number" min="100" max="5000" step="1" value="256" />
+          </label>
+          <label for="noise">label noise
+            <input id="noise" type="range" min="0" max="20" step="1" value="0" aria-label="label noise percent" />
+            <output id="noise-out" for="noise">0%</output>
+          </label>
+          <button id="noise-preset" class="ghost" type="button">8% preset</button>
+          <button id="btn-regen" class="ghost" type="button">Regenerate</button>
+        </div>
+        <p class="muted noise-note" id="noise-note">
+          Label noise intentionally flips a small share of corpus labels (in either split) so the
+          model can fit through bad examples while test accuracy cannot stay perfect. Default is 0%;
+          the 8% preset is one click away. Flipped rows are badged in the Data panel.
+        </p>
       </section>
 
       <section class="panel" id="panel-export">
@@ -72,8 +103,8 @@
         <button id="btn-export">Export .onnx</button>
         <p class="muted" id="export-note">
           A real ONNX file written by the Rust core: four nodes
-          (<code>Gemm → Tanh → Gemm → Sigmoid</code>), opset 13, IR 8, initializers named after the
-          struct fields. Open it in <a href="https://netron.app/">Netron</a>.
+          (<code>Gemm → activation → Gemm → Sigmoid</code>), opset 13, IR 8, initializers named
+          after the struct fields. Open it in <a href="https://netron.app/">Netron</a>.
         </p>
         <pre class="summary" id="export-summary">not exported yet</pre>
         <div class="controls">
@@ -83,15 +114,17 @@
           Loads the exported bytes into <code>onnxruntime-web</code> (CDN, this view only) and
           compares every test-set prediction with the in-browser model.
         </p>
+        <div class="scroll" tabindex="0" role="region" aria-label="ONNX graph anatomy">
+          <table class="data-table anatomy" id="export-anatomy" aria-label="ONNX graph anatomy"></table>
+        </div>
       </section>
 
       <section class="panel wide" id="panel-data">
         <h2>3 · Data</h2>
         <p class="muted" id="data-stats"></p>
         <div class="controls">
-          <label>
-            class
-            <select id="filter-class">
+          <label for="filter-class">class
+            <select id="filter-class" aria-label="filter by class">
               <option value="all">all</option>
               <option value="1">positive</option>
               <option value="0">negative</option>
@@ -106,11 +139,11 @@
           <span class="muted" id="data-count"></span>
         </div>
         <div class="data-grid">
-          <div class="scroll tall">
-            <table class="data-table" id="snippet-table"></table>
+          <div class="scroll tall" tabindex="0" role="region" aria-label="generated snippets">
+            <table class="data-table" id="snippet-table" aria-label="generated snippets"></table>
           </div>
-          <div class="scroll tall">
-            <table class="data-table" id="token-table"></table>
+          <div class="scroll tall" tabindex="0" role="region" aria-label="token counts by class">
+            <table class="data-table" id="token-table" aria-label="token counts by class"></table>
           </div>
         </div>
       </section>
@@ -121,16 +154,53 @@
           <code>W1</code> is <span id="w1-shape">H × V</span> — one row per hidden unit, one column
           per vocabulary token. Cells flash when they move.
         </p>
-        <div class="scroll">
-          <table class="weights" id="w1"></table>
+        <div class="scroll" tabindex="0" role="region" aria-label="W1 weights">
+          <table class="weights" id="w1" aria-label="W1 weights"></table>
         </div>
         <div class="small-weights">
-          <table class="weights" id="b1w2"></table>
+          <table class="weights" id="b1w2" aria-label="b1 and W2 weights"></table>
+        </div>
+      </section>
+
+      <section class="panel wide" id="panel-gradients">
+        <h2>5 · Gradients</h2>
+        <p class="muted">
+          Gradients: <span id="grad-state" aria-live="polite">train to refresh</span>. Hover or
+          focus a cell to see the weight, gradient, and next-step projection.
+        </p>
+        <div class="grad-meta">
+          <span id="grad-lr">lr = —</span>
+          <span id="grad-step">step = —</span>
+          <span id="grad-l2">L2 off</span>
+        </div>
+        <p class="grad-rule" id="grad-rule">theta &lt;- theta - lr * dtheta</p>
+        <p class="grad-detail" id="grad-detail" aria-live="polite">
+          Hover or focus a gradient cell for θ → dθ → θ − lr·dθ (next step).
+        </p>
+        <p class="sr-only" id="grad-help">
+          Each gradient table is a grid. Use the arrow keys to move between cells; Home and End move
+          within a row.
+        </p>
+        <div class="scroll">
+          <table
+            class="weights grad-table"
+            id="grad-w1"
+            aria-label="dW1 gradients, 8 by 50"
+            aria-describedby="grad-help"
+          ></table>
+        </div>
+        <div class="small-weights">
+          <table
+            class="weights grad-table"
+            id="grad-small"
+            aria-label="dW2, db1, and db2 gradients"
+            aria-describedby="grad-help"
+          ></table>
         </div>
       </section>
 
       <section class="panel wide" id="panel-trace">
-        <h2>5 · Trace a prediction</h2>
+        <h2>6 · Trace a prediction</h2>
         <div class="controls">
           <input id="trace-text" type="text" value="the service was great" aria-label="sentence to classify" />
           <button id="btn-trace">Trace</button>
